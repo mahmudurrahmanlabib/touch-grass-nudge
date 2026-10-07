@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Touch Grass Nudge</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f7f2; --fg: #1d2a1f; --card: #fff; --accent: #2f6b3f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141a15; --fg: #e6efe6; --card: #1d261e; --accent: #7fc48f; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, sans-serif; }
+  main { width: min(30rem, 92vw); padding: 1.5rem 0; }
+  .card { background: var(--card); border-radius: 16px; padding: 1.5rem; box-shadow: 0 2px 12px #0002; }
+  h1 { margin: 0 0 .25rem; } .muted { opacity: .7; font-size: .9rem; }
+  button { font: inherit; padding: .7rem 1.2rem; border: 0; border-radius: 10px; background: var(--accent); color: var(--bg); cursor: pointer; }
+  button.ghost { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  #quest { font-size: 1.25rem; margin: 1rem 0; white-space: pre-wrap; } .row { display: flex; gap: .6rem; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main><div class="card">
+  <h1>🌿 Touch Grass Nudge</h1>
+  <p class="muted" id="weather">Checking the sky…</p>
+  <p id="quest" aria-live="polite"></p>
+  <div class="row">
+    <button id="go">Give me a 10-minute quest</button>
+    <button id="done" class="ghost" hidden>I did it ✅</button>
+  </div>
+  <p class="muted" id="streak"></p>
+  <p class="muted" id="source"></p>
+</div></main>
+<script>
+const $ = (id) => document.getElementById(id);
+const OLLAMA = 'http://localhost:11434', MODEL = new URLSearchParams(location.search).get('model') || 'gemma3:1b';
+const FALLBACK = ['Walk to the nearest tree and find three different leaf shapes.', 'Stand still outside for two minutes and count every bird sound you hear.',
+  'Find something red outdoors and notice what it is growing on.', 'Walk around the block and spot one thing you have never noticed before.'];
+let weather = 'unknown weather';
+
+function streak() {
+  let days = [];
+  try { days = JSON.parse(localStorage.getItem('grass') || '[]'); } catch {}
+  $('streak').textContent = days.length ? `Quests completed: ${days.length}. Last: ${days.at(-1)}` : '';
+  return days;
+}
+
+async function loadWeather() {
+  try {
+    const pos = await new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 8000 }));
+    const { latitude: la, longitude: lo } = pos.coords;
+    const r = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&current=temperature_2m,precipitation,wind_speed_10m&daily=sunset&timezone=auto`)).json();
+    const c = r.current;
+    weather = `${c.temperature_2m}°C, ${c.precipitation} mm rain, wind ${c.wind_speed_10m} km/h, sunset ${r.daily.sunset[0].slice(11)}`;
+  } catch { weather = 'weather unavailable'; }
+  $('weather').textContent = `Right now: ${weather}`;
+}
+
+async function ask() {
+  const prompt = `You are a friendly outdoors coach. Conditions: ${weather}. Local time: ${new Date().toLocaleTimeString()}. ` +
+    `Suggest ONE real, safe 10-minute outdoor activity that needs no equipment (no fantasy, no story). If it is raining, suggest something that works with rain or a sheltered doorstep. Reply with exactly 2 short sentences and nothing else.`;
+  const r = await fetch(`${OLLAMA}/api/generate`, { method: 'POST', body: JSON.stringify({ model: MODEL, prompt, stream: false }) });
+  if (!r.ok) throw new Error(r.status);
+  return (await r.json()).response.trim();
+}
+
+$('go').onclick = async () => {
+  $('go').disabled = true; $('quest').textContent = 'Thinking…';
+  try { $('quest').textContent = await ask(); $('source').textContent = `Written by ${MODEL} running on your machine.`; }
+  catch { $('quest').textContent = FALLBACK[Math.floor(Math.random() * FALLBACK.length)]; $('source').textContent = 'Local model not reachable, so here is a built-in quest.'; }
+  $('go').disabled = false; $('go').textContent = 'Another one'; $('done').hidden = false;
+};
+$('done').onclick = () => {
+  const days = streak(); days.push(new Date().toLocaleDateString());
+  try { localStorage.setItem('grass', JSON.stringify(days)); } catch {}
+  streak(); $('quest').textContent = 'Nice. Now go outside. 🌳'; $('done').hidden = true;
+};
+streak(); loadWeather();
+</script>
+</body>
+</html>
